@@ -1,63 +1,69 @@
 (ns cucumber.runtime.clj
   (:require (clojure [string :as str]))
   (:import (cucumber.runtime CucumberException
-                             JdkPatternArgumentMatcher
-                             StepDefinition
                              HookDefinition
-                             TagPredicate)
+                             StepDefinition)
+           (cucumber.runtime.filter TagPredicate)
            (cucumber.runtime.snippets Snippet
                                       SnippetGenerator)
-           (clojure.lang RT))
+           (io.cucumber.core.model Classpath)
+           (io.cucumber.stepexpression ExpressionArgumentMatcher
+                                       StepExpressionFactory)
+           (clojure.lang RT)
+           (java.lang.reflect Type))
   (:gen-class :name cucumber.runtime.clj.Backend
               :implements [cucumber.runtime.Backend]
               :constructors
-              {[cucumber.runtime.io.ResourceLoader] []}
+              {[cucumber.runtime.io.ResourceLoader io.cucumber.stepexpression.TypeRegistry] []}
               :init init
               :state state))
 
 (def glue (atom nil))
+(def type-registry (atom nil))
 
 (defn clojure-snippet []
   (reify
     Snippet
     (template [_]
       (str
-       "({0} #\"{1}\" [{3}]\n"
-       "  (comment  {4}  )\n"
+       "({0} \"{1}\" [{3}]\n"
+       "  (comment {4})\n"
        "  (throw (cucumber.api.PendingException.)))\n"))
     (arguments [_ argumentTypes]
-      (str/replace (SnippetGenerator/untypedArguments argumentTypes)
-                   "," ""))
-    (namedGroupStart [_] nil)
-    (namedGroupEnd [_] nil)
+      (->> argumentTypes
+           (map-indexed (fn [i _] (str "arg" i)))
+           (str/join " ")))
     (tableHint [_] nil)
     (escapePattern [_ pattern]
       (str/replace (str pattern) "\"" "\\\""))))
 
-(def snippet-generator (SnippetGenerator. (clojure-snippet)))
-
 (defn load-script [path]
   (try
-    (RT/load (str (.replaceAll path ".clj$" "")) true)
+    (RT/load (str/replace path #"\.clj$" "") true)
     (catch Throwable t
       (throw (CucumberException. t)))))
 
-(defn- -init [resource-loader]
-  [[] (atom {:resource-loader resource-loader})])
+(defn- -init [resource-loader a-type-registry]
+  (reset! type-registry a-type-registry)
+  (let [snippet-generator (->> a-type-registry
+                               .parameterTypeRegistry
+                               (SnippetGenerator. (clojure-snippet)))]
+    [[] (atom {:resource-loader resource-loader
+               :snippet-generator snippet-generator})]))
 
 (defn -loadGlue [cljb a-glue glue-paths]
   (reset! glue a-glue)
   (doseq [path glue-paths
           resource (.resources (:resource-loader @(.state cljb)) path ".clj")]
     (binding [*ns* (create-ns 'cucumber.runtime.clj)]
-      (load-script (.getPath resource)))))
+      (load-script (-> resource .getPath Classpath/resourceName)))))
 
 (defn- -buildWorld [cljb])
 
 (defn- -disposeWorld [cljb])
 
 (defn- -getSnippet [cljb step keyword _]
-  (.getSnippet snippet-generator step keyword nil))
+  (.getSnippet (:snippet-generator @(.state cljb)) step keyword nil))
 
 (defn- -setUnreportedStepExecutor [cljb executor]
   "executor")
@@ -70,16 +76,17 @@
    @glue
    (reify
      StepDefinition
-     (matchedArguments [_ step]
-       (.argumentsFrom (JdkPatternArgumentMatcher. pattern)
-                       (.getText step)))
+      (matchedArguments [_ step]
+        (-> @type-registry
+            StepExpressionFactory.
+            (.createExpression (str pattern))
+            ExpressionArgumentMatcher.
+            (.argumentsFrom step (into-array Type []))))
      (getLocation [_ detail]
        (location-str location))
      (getParameterCount [_]
        nil)
-     (getParameterType [_ n argumentType]
-       nil)
-     (execute [_ locale args]
+     (execute [_ args]
        (apply fun args))
      (isDefinedAt [_ stack-trace-element]
        (and (= (.getLineNumber stack-trace-element)
@@ -87,7 +94,9 @@
             (= (.getFileName stack-trace-element)
                (:file location))))
      (getPattern [_]
-       (str pattern)))))
+       (str pattern))
+     (isScenarioScoped [_]
+       false))))
 
 (defmulti add-hook-definition (fn [t & _] t))
 
@@ -173,7 +182,7 @@
    It evaluates to the clojure literal:
      {:from 1293884100000, :to 1293884100000}"
   [data]
-  (->> (into {} (map vec (.raw data)))
+  (->> (into {} (map vec (.asLists data)))
        (update-values read-cuke-str)
        (update-keys keyword)))
 
@@ -189,7 +198,7 @@
      [{:id 55, :name \"foo\", :created-at 1293884100000}
       {:id 56, :name \"bar\", :created-at 1293884100000}]"
   [data]
-  (let [data (map seq (.raw data))
+  (let [data (map seq (.asLists data))
         header-keys (map keyword (first data))
         remove-blank (fn [m,k,v] (if (seq (str v)) (assoc m k v) m))
         row->hash (fn [row] (apply hash-map
