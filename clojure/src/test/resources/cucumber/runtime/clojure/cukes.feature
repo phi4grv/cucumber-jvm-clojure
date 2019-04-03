@@ -15,3 +15,6 @@ Feature: Cukes
   @foo
   Scenario:
     Given I have 4 cukes in my belly
+
+  Scenario:
+    Given I have a red ball

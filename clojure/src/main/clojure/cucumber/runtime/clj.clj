@@ -7,10 +7,13 @@
            (cucumber.runtime.snippets Snippet
                                       SnippetGenerator)
            (io.cucumber.core.model Classpath)
+           (io.cucumber.cucumberexpressions CaptureGroupTransformer
+                                            ParameterType)
            (io.cucumber.stepexpression ExpressionArgumentMatcher
                                        StepExpressionFactory)
            (clojure.lang RT)
-           (java.lang.reflect Type))
+           (java.lang.reflect Type)
+           (java.util ArrayList))
   (:gen-class :name cucumber.runtime.clj.Backend
               :implements [cucumber.runtime.Backend]
               :constructors
@@ -206,3 +209,24 @@
                                                (map read-cuke-str row))))]
     (map (fn [row-vals] (reduce-kv remove-blank {} (row->hash row-vals)))
          (next data))))
+
+(defn define-parameter-type
+  ([name regexps transformer]
+   (define-parameter-type name regexps transformer {}))
+  ([name regexps transformer
+    {:keys [use-for-snippets prefer-for-regexp-match]
+     :or {use-for-snippets true prefer-for-regexp-match false}}]
+   (let [patterns (cond->> regexps
+                    (not (sequential? regexps)) vector
+                    true (into [] (map str)))
+        tf-fn (reify CaptureGroupTransformer
+                (transform [this args]
+                  (transformer args)))]
+    (.defineParameterType @type-registry
+                          (ParameterType.
+                            name
+                            (java.util.ArrayList. patterns)
+                            (class Object)
+                            tf-fn
+                            use-for-snippets
+                            prefer-for-regexp-match)))))

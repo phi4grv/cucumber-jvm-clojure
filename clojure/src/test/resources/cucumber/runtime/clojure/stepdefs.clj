@@ -35,3 +35,8 @@
 
 (Then "the clojure literal equivalent should be:" [literal-as-string]
   (assert (= @most-recent (read-string literal-as-string))))
+
+(Given "I have a {color} ball" [color]
+       (assert (keyword? color)))
+
+(define-parameter-type "color" #"red|blue|yellow" (comp keyword first))
