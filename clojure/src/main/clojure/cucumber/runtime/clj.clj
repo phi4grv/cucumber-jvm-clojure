@@ -24,6 +24,20 @@
 (def glue (atom nil))
 (def type-registry (atom nil))
 
+(def before-all (atom []))
+(def after-all (atom []))
+
+(defn- run-global-hook [hook]
+  (doseq [f @hook]
+    (try
+      (f)
+      (catch Exception e
+        (.printStackTrace e)))))
+
+(defn reset-global-hooks! []
+    (reset! before-all [])
+    (reset! after-all []))
+
 (defn clojure-snippet []
   (reify
     Snippet
@@ -61,9 +75,11 @@
     (binding [*ns* (create-ns 'cucumber.runtime.clj)]
       (load-script (-> resource .getPath Classpath/resourceName)))))
 
-(defn- -buildWorld [cljb])
+(defn- -buildWorld [cljb]
+  (run-global-hook before-all))
 
-(defn- -disposeWorld [cljb])
+(defn- -disposeWorld [cljb]
+  (run-global-hook after-all))
 
 (defn- -getSnippet [cljb step keyword _]
   (.getSnippet (:snippet-generator @(.state cljb)) step keyword nil))
@@ -159,6 +175,12 @@
 
 (defmacro After [tags & body]
   `(add-hook-definition :after ~tags (fn [] ~@body) ~(hook-location *file* &form)))
+
+(defn add-before-all [f]
+  (swap! before-all conj f))
+
+(defn add-after-all [f]
+  (swap! after-all conj f))
 
 (defn ^:private update-keys [f m]
   (reduce-kv #(assoc %1 (f %2) %3) {} m))
