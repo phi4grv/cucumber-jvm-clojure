@@ -1,4 +1,4 @@
-(defproject cucumber-clojure "4.2.6-SNAPSHOT"
+(defproject phi4grv/cucumber-clojure "4.2.6-SNAPSHOT"
   :source-paths ["src/main/clojure"]
   :test-paths ["src/test/clojure"]
   :resource-paths ["src/test/resources"]
